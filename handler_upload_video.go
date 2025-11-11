@@ -116,6 +116,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error opening processed file", err)
+		return
 	}
 
 	_, uploadErr := cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
@@ -126,9 +127,10 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	})
 	if uploadErr != nil {
 		respondWithError(w, http.StatusInternalServerError, "error uploading to s3 bucket", err)
+		return
 	}
 
-	videoUrl := "https://" + cfg.s3Bucket + ".s3." + cfg.s3Region + ".amazonaws.com/" + videoFileName
+	videoUrl := "https://" + cfg.s3CfDistribution + "/" + videoFileName
 
 	if err := cfg.db.UpdateVideo(database.Video{
 		ID:                videoId,
@@ -139,5 +141,14 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		CreateVideoParams: dbVideoMetadata.CreateVideoParams,
 	}); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error saving to db", err)
+		return
 	}
+
+	dbUpdatedVideo, err := cfg.db.GetVideo(videoId)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error getting updated video", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, dbUpdatedVideo)
 }
