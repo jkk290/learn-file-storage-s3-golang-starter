@@ -67,7 +67,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusBadRequest, "invalid video format", err)
 		return
 	}
-	tempUploadFile, err := os.CreateTemp("", "tubely-upload.mp4")
+	tempUploadFile, err := os.CreateTemp("", "tubely-upload*.mp4")
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error creating temp file", err)
 		return
@@ -80,30 +80,18 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	tempUploadFile.Seek(0, io.SeekStart)
-	aspectRatio, err := getVideoAspectRatio(tempUploadFile.Name())
+	tempFilePath := tempUploadFile.Name()
+	processedFilePath, err := processVideoForFastStart(tempFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error setting fast start", err)
+		return
+	}
+	aspectRatio, err := getVideoAspectRatio(processedFilePath)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error getting aspect ratio", err)
 		return
 	}
 
-	randSlice := make([]byte, 32)
-	_, readErr := rand.Read(randSlice)
-	if readErr != nil {
-		respondWithError(w, http.StatusInternalServerError, "error creating random bytes", err)
-		return
-	}
-	randString := base64.RawURLEncoding.EncodeToString(randSlice)
-	videoFileName := randString + ".mp4"
-
-	_, uploadErr := cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
-		Bucket:      &cfg.s3Bucket,
-		Key:         &videoFileName,
-		Body:        tempUploadFile,
-		ContentType: &mediaType,
-	})
-	if uploadErr != nil {
-		respondWithError(w, http.StatusInternalServerError, "error uploading to s3 bucket", err)
-	}
 	var prefix string
 	if aspectRatio == "16:9" {
 		prefix = "landscape"
@@ -113,7 +101,34 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		prefix = "other"
 	}
 
-	videoUrl := "https://" + cfg.s3Bucket + ".s3." + cfg.s3Region + ".amazonaws.com/" + prefix + "/" + videoFileName
+	randSlice := make([]byte, 32)
+	_, readErr := rand.Read(randSlice)
+	if readErr != nil {
+		respondWithError(w, http.StatusInternalServerError, "error creating random bytes", err)
+		return
+	}
+	randString := base64.RawURLEncoding.EncodeToString(randSlice)
+	videoFileName := prefix + "/" + randString + ".mp4"
+
+	processedFile, err := os.Open(processedFilePath)
+	defer os.Remove(processedFile.Name())
+	defer processedFile.Close()
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error opening processed file", err)
+	}
+
+	_, uploadErr := cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+		Bucket:      &cfg.s3Bucket,
+		Key:         &videoFileName,
+		Body:        processedFile,
+		ContentType: &mediaType,
+	})
+	if uploadErr != nil {
+		respondWithError(w, http.StatusInternalServerError, "error uploading to s3 bucket", err)
+	}
+
+	videoUrl := "https://" + cfg.s3Bucket + ".s3." + cfg.s3Region + ".amazonaws.com/" + videoFileName
 
 	if err := cfg.db.UpdateVideo(database.Video{
 		ID:                videoId,

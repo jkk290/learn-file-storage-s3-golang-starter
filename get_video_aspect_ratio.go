@@ -16,7 +16,7 @@ func getVideoAspectRatio(filepath string) (string, error) {
 	var cmdOutput bytes.Buffer
 	cmd.Stdout = &cmdOutput
 	if err := cmd.Run(); err != nil {
-		log.Printf("error running cmd", err)
+		log.Printf("error running cmd %s", err)
 	}
 	jsonOutput := ffprobeOutput{}
 
