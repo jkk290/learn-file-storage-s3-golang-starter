@@ -80,6 +80,11 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	tempUploadFile.Seek(0, io.SeekStart)
+	aspectRatio, err := getVideoAspectRatio(tempUploadFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error getting aspect ratio", err)
+		return
+	}
 
 	randSlice := make([]byte, 32)
 	_, readErr := rand.Read(randSlice)
@@ -99,7 +104,16 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	if uploadErr != nil {
 		respondWithError(w, http.StatusInternalServerError, "error uploading to s3 bucket", err)
 	}
-	videoUrl := "https://" + cfg.s3Bucket + ".s3." + cfg.s3Region + ".amazonaws.com/" + videoFileName
+	var prefix string
+	if aspectRatio == "16:9" {
+		prefix = "landscape"
+	} else if aspectRatio == "9:16" {
+		prefix = "portrait"
+	} else {
+		prefix = "other"
+	}
+
+	videoUrl := "https://" + cfg.s3Bucket + ".s3." + cfg.s3Region + ".amazonaws.com/" + prefix + "/" + videoFileName
 
 	if err := cfg.db.UpdateVideo(database.Video{
 		ID:                videoId,
